@@ -1,60 +1,63 @@
 class TagCloud
 
-  attr_reader :current_user
-  def initialize(current_user)
-    @current_user = current_user
+  attr_reader :user, :divisor, :min_90days, :divisor_90days
+
+  def initialize(user, cut_off = nil)
+    @user = user
+    @cut_off = cut_off
   end
 
-  def compute
-    # tag cloud code inspired by this article
-    #  http://www.juixe.com/techknow/index.php/2006/07/15/acts-as-taggable-tag-cloud/
+  def tags
+    unless @tags
+      params = [sql(@cut_off), user.id]
+      if @cut_off
+        params += [@cut_off, @cut_off]
+      end
+      @tags = Tag.find_by_sql(params).sort_by { |tag| tag.name.downcase }
+    end
+    @tags
+  end
 
-    levels=10
-    # TODO: parameterize limit
 
-    # Get the tag cloud for all tags for actions
-    query = "SELECT tags.id, name, count(*) AS count"
-    query << " FROM taggings, tags, todos"
-    query << " WHERE tags.id = tag_id"
-    query << " AND taggings.taggable_id = todos.id"
-    query << " AND todos.user_id="+current_user.id.to_s+" "
-    query << " AND taggings.taggable_type='Todo' "
-    query << " GROUP BY tags.id, tags.name"
-    query << " ORDER BY count DESC, name"
-    query << " LIMIT 100"
-    @tags_for_cloud = Tag.find_by_sql(query).sort_by { |tag| tag.name.downcase }
+  def relative_size(tag)
+    (tag.count.to_i - min) / divisor
+  end
 
-    max, @tags_min = 0, 0
-    @tags_for_cloud.each { |t|
-      max = [t.count.to_i, max].max
-      @tags_min = [t.count.to_i, @tags_min].min
-    }
-
-    @tags_divisor = ((max - @tags_min) / levels) + 1
-
-    # Get the tag cloud for all tags for actions
+  private
+  # TODO: parameterize limit
+  def sql(cut_off = nil)
     query = "SELECT tags.id, tags.name AS name, count(*) AS count"
     query << " FROM taggings, tags, todos"
     query << " WHERE tags.id = tag_id"
     query << " AND todos.user_id=? "
     query << " AND taggings.taggable_type='Todo' "
     query << " AND taggings.taggable_id=todos.id "
-    query << " AND (todos.created_at > ? OR "
-    query << "      todos.completed_at > ?) "
+    if cut_off
+      query << " AND (todos.created_at > ? OR "
+      query << "      todos.completed_at > ?) "
+    end
     query << " GROUP BY tags.id, tags.name"
     query << " ORDER BY count DESC, name"
     query << " LIMIT 100"
-    @tags_for_cloud_90days = Tag.find_by_sql(
-      [query, current_user.id, @cut_off_3months, @cut_off_3months]
-    ).sort_by { |tag| tag.name.downcase }
+  end
 
-    max_90days, @tags_min_90days = 0, 0
-    @tags_for_cloud_90days.each { |t|
-      max_90days = [t.count.to_i, max_90days].max
-      @tags_min_90days = [t.count.to_i, @tags_min_90days].min
-    }
+  def min
+    return 0
+  end
 
-    @tags_divisor_90days = ((max_90days - @tags_min_90days) / levels) + 1
+  def divisor
+    @divisor ||= ((max-min) / levels) + 1
+  end
 
+  def levels
+    return 10    
+  end
+
+  def tag_counts
+    @tag_counts ||= tags.map {|t| t.count.to_i }
+  end
+
+  def max
+    tag_counts.max
   end
 end
